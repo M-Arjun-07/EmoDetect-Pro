@@ -1,7 +1,6 @@
-pandas
 numpy
-matplotlib
-seaborn
-tensorflow
-scikit-lear
 opencv-python
+matplotlib
+scikit-learn
+tensorflow
+mediapipe
