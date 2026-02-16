@@ -10,6 +10,8 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.regularizers import l2
+from sklearn.utils.class_weight import compute_class_weight
 
 
 # ==============================
@@ -58,29 +60,37 @@ def load_dataset(path):
 
 
 # ==============================
-# BUILD MODEL
+# BUILD IMPROVED CNN MODEL
 # ==============================
 def build_model(input_shape, num_classes):
     model = Sequential()
 
     model.add(Input(shape=input_shape))
 
-    model.add(Conv2D(32, (3, 3), activation='relu'))
+    # Block 1
+    model.add(Conv2D(64, (3, 3), activation='relu', padding='same'))
     model.add(BatchNormalization())
     model.add(MaxPooling2D((2, 2)))
 
-    model.add(Conv2D(64, (3, 3), activation='relu'))
+    # Block 2
+    model.add(Conv2D(128, (3, 3), activation='relu', padding='same'))
     model.add(BatchNormalization())
     model.add(MaxPooling2D((2, 2)))
 
-    model.add(Conv2D(128, (3, 3), activation='relu'))
+    # Block 3
+    model.add(Conv2D(256, (3, 3), activation='relu', padding='same'))
+    model.add(BatchNormalization())
+    model.add(MaxPooling2D((2, 2)))
+
+    # Extra depth
+    model.add(Conv2D(256, (3, 3), activation='relu', padding='same'))
     model.add(BatchNormalization())
     model.add(MaxPooling2D((2, 2)))
 
     model.add(Flatten())
 
-    model.add(Dense(128, activation='relu'))
-    model.add(Dropout(0.6))
+    model.add(Dense(256, activation='relu', kernel_regularizer=l2(0.001)))
+    model.add(Dropout(0.5))
 
     model.add(Dense(num_classes, activation='softmax'))
 
@@ -92,17 +102,28 @@ def build_model(input_shape, num_classes):
 # ==============================
 if __name__ == "__main__":
 
-    # Load train and test separately
+    # Load train and test
     X_train, y_train = load_dataset(TRAIN_PATH)
     X_test, y_test = load_dataset(TEST_PATH)
+
+    y_train_labels = y_train.copy()  # save before one-hot
 
     y_train = to_categorical(y_train, num_classes=len(emotion_labels))
     y_test = to_categorical(y_test, num_classes=len(emotion_labels))
 
+    # Compute class weights (fix imbalance)
+    class_weights = compute_class_weight(
+        class_weight='balanced',
+        classes=np.unique(y_train_labels),
+        y=y_train_labels
+    )
+    class_weights = dict(enumerate(class_weights))
+    print("Class Weights:", class_weights)
+
     model = build_model((48, 48, 1), len(emotion_labels))
 
     model.compile(
-        optimizer=Adam(learning_rate=0.0005),
+        optimizer=Adam(learning_rate=0.0003),
         loss='categorical_crossentropy',
         metrics=['accuracy']
     )
@@ -111,16 +132,16 @@ if __name__ == "__main__":
 
     early_stop = EarlyStopping(
         monitor='val_loss',
-        patience=5,
+        patience=7,
         restore_best_weights=True
     )
 
-    # Data augmentation (train only)
+    # Data augmentation
     datagen = ImageDataGenerator(
-        rotation_range=15,
-        width_shift_range=0.1,
-        height_shift_range=0.1,
-        zoom_range=0.1,
+        rotation_range=20,
+        width_shift_range=0.15,
+        height_shift_range=0.15,
+        zoom_range=0.15,
         horizontal_flip=True
     )
 
@@ -128,12 +149,13 @@ if __name__ == "__main__":
 
     history = model.fit(
         datagen.flow(X_train, y_train, batch_size=32),
-        epochs=50,
+        epochs=60,
         validation_data=(X_test, y_test),
-        callbacks=[early_stop]
+        callbacks=[early_stop],
+        class_weight=class_weights
     )
 
     os.makedirs("models", exist_ok=True)
-    model.save("models/emotion_model.keras")
+    model.save("models/emotion_model_improved.keras")
 
-    print("Model Saved Successfully!")
+    print("Improved Model Saved Successfully!")

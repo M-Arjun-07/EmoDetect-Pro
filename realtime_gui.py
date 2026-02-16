@@ -4,7 +4,7 @@ import mediapipe as mp
 from tensorflow.keras.models import load_model
 
 # Load emotion model
-model = load_model("models/emotion_model.keras")
+model = load_model("models/emotion_model_improved.keras")
 emotion_labels = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
 
 # -------- MediaPipe NEW API --------
