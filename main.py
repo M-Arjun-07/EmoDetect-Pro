@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, Toplevel, Checkbutton, IntVar
 import cv2
 import PIL.Image, PIL.ImageTk
 import numpy as np
@@ -18,19 +18,8 @@ EMOTION_LABELS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surpri
 COLOR_BG = "#1e1e1e"       # Dark Gray Background
 COLOR_PANEL = "#2d2d2d"    # Lighter Panel Background
 COLOR_TEXT = "#ffffff"     # White Text
-COLOR_ACCENT = "#00ff88"   # Neon Green for Overlay
+COLOR_ACCENT = "#00ff88"   # Neon Green
 COLOR_BAR = "#3498db"      # Blue for Bar Charts
-
-# --- HARDCODED FACE CONTOURS (To avoid import errors) ---
-# These are the standard MediaPipe indices for the smooth lines of the face
-FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
-LIPS = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185]
-LEFT_EYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466]
-RIGHT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
-LEFT_EYEBROW = [276, 283, 300, 293, 334, 296, 336, 285]
-RIGHT_EYEBROW = [46, 53, 52, 65, 55, 70, 63, 105]
-
-ALL_CONTOURS = [FACE_OVAL, LIPS, LEFT_EYE, RIGHT_EYE, LEFT_EYEBROW, RIGHT_EYEBROW]
 
 class EmotionApp:
     def __init__(self, window, window_title):
@@ -43,6 +32,7 @@ class EmotionApp:
         self.camera_index = 0
         self.is_running = True
         self.show_logic = True
+        self.show_overlay = True  # Toggle for the Scanner Overlay
         self.timestamp_ms = 0
         self.last_frame_time = 0
 
@@ -88,11 +78,15 @@ class EmotionApp:
         tk.Label(self.top_bar, text="AI Emotion Dashboard", font=("Arial", 16, "bold"), 
                  bg=COLOR_PANEL, fg=COLOR_TEXT).pack(side=tk.LEFT, padx=20, pady=10)
 
-        # Settings Buttons
+        # Buttons
         btn_style = {"bg": "#444", "fg": "white", "bd": 0, "padx": 10, "pady": 5}
         
         self.btn_toggle = tk.Button(self.top_bar, text="Toggle Fullscreen", command=self.toggle_view, **btn_style)
         self.btn_toggle.pack(side=tk.RIGHT, padx=10)
+        
+        # Settings Button
+        self.btn_settings = tk.Button(self.top_bar, text="Settings", command=self.open_settings, **btn_style)
+        self.btn_settings.pack(side=tk.RIGHT, padx=10)
 
         self.btn_cam = tk.Button(self.top_bar, text="Switch Camera", command=self.switch_camera, **btn_style)
         self.btn_cam.pack(side=tk.RIGHT, padx=10)
@@ -110,7 +104,7 @@ class EmotionApp:
         # Right: Logic Visualization Panel
         self.logic_panel = tk.Frame(self.main_container, bg=COLOR_PANEL, width=400)
         self.logic_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-        self.logic_panel.pack_propagate(False) # Don't shrink
+        self.logic_panel.pack_propagate(False)
 
         self.setup_logic_panel()
 
@@ -126,7 +120,7 @@ class EmotionApp:
         tk.Label(self.logic_panel, text="Step 1: Face ROI & Preprocessing", font=("Arial", 10), 
                  bg=COLOR_PANEL, fg=COLOR_TEXT).pack(anchor="w", padx=pad)
         
-        self.lbl_roi = tk.Label(self.logic_panel, bg="black", width=100, height=100) # Placeholder for face image
+        self.lbl_roi = tk.Label(self.logic_panel, bg="black", width=100, height=100)
         self.lbl_roi.pack(pady=5)
         
         tk.Label(self.logic_panel, text="Input transformed to 48x48 Grayscale", font=("Arial", 8, "italic"), 
@@ -147,7 +141,6 @@ class EmotionApp:
             tk.Label(row, text=emotion.ljust(10), font=("Courier", 10), width=10, anchor="w",
                      bg=COLOR_PANEL, fg=COLOR_TEXT).pack(side=tk.LEFT)
             
-            # Progress bar style custom canvas
             canvas = tk.Canvas(row, width=150, height=15, bg="#444", highlightthickness=0)
             canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
             rect = canvas.create_rectangle(0, 0, 0, 15, fill=COLOR_BAR)
@@ -165,19 +158,37 @@ class EmotionApp:
         self.status_log.pack(fill=tk.X, padx=pad)
 
     def log_status(self, message):
-        """Updates the retro-style text log"""
         self.status_log.config(state=tk.NORMAL)
         self.status_log.insert(tk.END, f"> {message}\n")
         self.status_log.see(tk.END)
         self.status_log.config(state=tk.DISABLED)
 
+    def open_settings(self):
+        """Opens a small pop-up window for settings"""
+        settings_win = Toplevel(self.window)
+        settings_win.title("Settings")
+        settings_win.geometry("300x200")
+        settings_win.configure(bg=COLOR_PANEL)
+
+        tk.Label(settings_win, text="Overlay Settings", font=("Arial", 12, "bold"), bg=COLOR_PANEL, fg="white").pack(pady=10)
+
+        # Checkbox for Overlay
+        self.overlay_var = IntVar(value=1 if self.show_overlay else 0)
+        chk_mesh = Checkbutton(settings_win, text="Show Face Scanner", variable=self.overlay_var, 
+                               command=self.toggle_overlay, bg=COLOR_PANEL, fg="white", selectcolor="#444", activebackground=COLOR_PANEL)
+        chk_mesh.pack(pady=10)
+
+        tk.Button(settings_win, text="Close", command=settings_win.destroy, bg="#444", fg="white").pack(pady=20)
+
+    def toggle_overlay(self):
+        self.show_overlay = bool(self.overlay_var.get())
+
     def switch_camera(self):
         self.camera_index += 1
         if self.camera_index > 2: self.camera_index = 0
-        
         self.cap.release()
         self.cap = cv2.VideoCapture(self.camera_index)
-        self.log_status(f"Switched to Camera Index {self.camera_index}")
+        self.log_status(f"Switched to Camera {self.camera_index}")
 
     def toggle_view(self):
         if self.show_logic:
@@ -188,31 +199,56 @@ class EmotionApp:
             self.btn_toggle.config(text="Fullscreen Cam")
         self.show_logic = not self.show_logic
 
-    def draw_styled_landmarks(self, image, landmarks):
-        """Draws smooth lines connecting specific face parts manually"""
-        h, w, _ = image.shape
-        
-        # Create a list of (x, y) tuples for all landmarks
-        points = []
-        for lm in landmarks:
-            points.append((int(lm.x * w), int(lm.y * h)))
+    # ==========================================
+    # SCANNER OVERLAY (Integrated)
+    # ==========================================
+    def draw_scanner_overlay(self, frame, landmarks):
+        overlay = frame.copy()
+        h, w, _ = frame.shape
 
-        # Draw lines for each contour
-        for contour in ALL_CONTOURS:
-            for i in range(len(contour) - 1):
-                start_idx = contour[i]
-                end_idx = contour[i+1]
-                
-                # Check bounds to avoid index errors
-                if start_idx < len(points) and end_idx < len(points):
-                    cv2.line(image, points[start_idx], points[end_idx], (0, 255, 136), 1, cv2.LINE_AA)
-            
-            # Close the loop for the oval and lips
-            if contour == FACE_OVAL or contour == LIPS or contour == LEFT_EYE or contour == RIGHT_EYE:
-                start_idx = contour[-1]
-                end_idx = contour[0]
-                if start_idx < len(points) and end_idx < len(points):
-                     cv2.line(image, points[start_idx], points[end_idx], (0, 255, 136), 1, cv2.LINE_AA)
+        points = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
+
+        x_coords = [p[0] for p in points]
+        y_coords = [p[1] for p in points]
+
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+
+        bracket_len = 30
+        color = (0, 255, 136) # Neon Green
+        thickness = 2
+
+        # Corner brackets
+        cv2.line(overlay, (x_min, y_min), (x_min + bracket_len, y_min), color, thickness)
+        cv2.line(overlay, (x_min, y_min), (x_min, y_min + bracket_len), color, thickness)
+
+        cv2.line(overlay, (x_max, y_min), (x_max - bracket_len, y_min), color, thickness)
+        cv2.line(overlay, (x_max, y_min), (x_max, y_min + bracket_len), color, thickness)
+
+        cv2.line(overlay, (x_min, y_max), (x_min + bracket_len, y_max), color, thickness)
+        cv2.line(overlay, (x_min, y_max), (x_min, y_max - bracket_len), color, thickness)
+
+        cv2.line(overlay, (x_max, y_max), (x_max - bracket_len, y_max), color, thickness)
+        cv2.line(overlay, (x_max, y_max), (x_max, y_max - bracket_len), color, thickness)
+
+        # Minimal key landmark dots
+        key_points = [33, 263, 61, 291, 1, 199, 10]
+
+        for idx in key_points:
+            # Safety check to ensure index exists in detected points
+            if idx < len(points):
+                cv2.circle(overlay, points[idx], 4, (255, 255, 255), -1)
+
+        # Clean connecting lines
+        connections = [(33, 1), (263, 1), (61, 1), (291, 1), (1, 199)]
+
+        for start, end in connections:
+            if start < len(points) and end < len(points):
+                cv2.line(overlay, points[start], points[end], (255, 255, 255), 1)
+
+        # Transparency effect (Mix overlay with original frame)
+        alpha = 0.7
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
     def update(self):
         if not self.is_running: return
@@ -226,8 +262,6 @@ class EmotionApp:
             # 2. Detect
             self.timestamp_ms += int((time.time() - self.last_frame_time) * 1000)
             self.last_frame_time = time.time()
-            
-            # Using current time ensures live video works better with the new API
             results = self.landmarker.detect_for_video(mp_image, int(time.time() * 1000))
 
             prediction_made = False
@@ -237,8 +271,9 @@ class EmotionApp:
                 for face_landmarks in results.face_landmarks:
                     h, w, _ = frame.shape
                     
-                    # --- DRAWING (The Good Graphics) ---
-                    self.draw_styled_landmarks(frame, face_landmarks)
+                    # --- DRAWING THE SCANNER OVERLAY ---
+                    if self.show_overlay:
+                        self.draw_scanner_overlay(frame, face_landmarks)
 
                     # --- LOGIC: Extract Face ---
                     x_coords = [lm.x for lm in face_landmarks]
@@ -246,7 +281,6 @@ class EmotionApp:
                     
                     x_min, x_max = int(min(x_coords) * w) - 20, int(max(x_coords) * w) + 20
                     y_min, y_max = int(min(y_coords) * h) - 20, int(max(y_coords) * h) + 20
-                    
                     x_min, x_max = max(0, x_min), min(w, x_max)
                     y_min, y_max = max(0, y_min), min(h, y_max)
 
@@ -256,9 +290,7 @@ class EmotionApp:
                         # --- PREPROCESSING ---
                         face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
                         face_resized = cv2.resize(face_gray, (48, 48))
-                        
-                        face_input = face_resized / 255.0
-                        face_input = np.reshape(face_input, (1, 48, 48, 1))
+                        face_input = np.reshape(face_resized / 255.0, (1, 48, 48, 1))
 
                         # --- MODEL PREDICTION ---
                         prediction = self.model.predict(face_input, verbose=0)[0]
@@ -266,7 +298,7 @@ class EmotionApp:
                         top_emotion = EMOTION_LABELS[max_index]
                         prediction_made = True
 
-                        # Draw Text on Screen
+                        # Draw Text
                         cv2.putText(frame, f"Emotion: {top_emotion}", (x_min, y_min - 15),
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 136), 2)
                         
@@ -303,7 +335,6 @@ class EmotionApp:
         self.cap.release()
         self.window.destroy()
 
-# --- MAIN ENTRY POINT ---
 if __name__ == "__main__":
     root = tk.Tk()
     app = EmotionApp(root, "Advance Emotion Recognition System")
