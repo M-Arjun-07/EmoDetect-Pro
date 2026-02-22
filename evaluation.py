@@ -7,7 +7,7 @@ import os
 import cv2
 
 # Load model
-model = load_model("models/emotion_model_improved.keras")
+model = load_model("models/emotion_model_70_percent.keras")
 
 TRAIN_PATH = "dataset/train"
 TEST_PATH = "dataset/test"
