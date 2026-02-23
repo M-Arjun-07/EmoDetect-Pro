@@ -1,102 +1,70 @@
 import os
-import numpy as np
 import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-from tensorflow.keras.applications import EfficientNetB2
-from tensorflow.keras.applications.efficientnet import preprocess_input
-from sklearn.utils.class_weight import compute_class_weight
+from tensorflow.keras import layers, models
+from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 
-# =====================================================
-# 1️⃣ GPU CONTROL (Stable ~3GB usage)
-# =====================================================
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
+# =====================
+# SETTINGS
+# =====================
 
-tf.keras.mixed_precision.set_global_policy("mixed_float16")
+IMG_SIZE = 224   # resize from 48 → 224
+BATCH_SIZE = 32
+EPOCHS = 40
+NUM_CLASSES = 7
 
-# =====================================================
-# 2️⃣ PARAMETERS (Balanced for RTX 3050 4GB)
-# =====================================================
-IMG_SIZE = 224
-BATCH_SIZE = 28          # Uses ~3GB VRAM safely
-EPOCHS_STAGE1 = 12
-EPOCHS_STAGE2 = 25
+DATASET_PATH = "dataset"
+MODEL_SAVE_PATH = "models/emotion_efficientnet.h5"
 
-TRAIN_PATH = "dataset/train"
-VAL_PATH = "dataset/test"
+# =====================
+# DATA GENERATOR
+# =====================
 
-# =====================================================
-# 3️⃣ DATA LOADING (No RAM explosion)
-# =====================================================
-train_ds = tf.keras.preprocessing.image_dataset_from_directory(
-    TRAIN_PATH,
-    image_size=(IMG_SIZE, IMG_SIZE),
-    batch_size=BATCH_SIZE,
-    color_mode="rgb",
-    shuffle=True
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=20,
+    zoom_range=0.2,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    horizontal_flip=True,
+    validation_split=0.1
 )
 
-val_ds = tf.keras.preprocessing.image_dataset_from_directory(
-    VAL_PATH,
-    image_size=(IMG_SIZE, IMG_SIZE),
+test_datagen = ImageDataGenerator(rescale=1./255)
+
+train_generator = train_datagen.flow_from_directory(
+    os.path.join(DATASET_PATH, "train"),
+    target_size=(IMG_SIZE, IMG_SIZE),
     batch_size=BATCH_SIZE,
+    class_mode="categorical",
+    color_mode="rgb",   # VERY IMPORTANT
+    subset="training"
+)
+
+val_generator = train_datagen.flow_from_directory(
+    os.path.join(DATASET_PATH, "train"),
+    target_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE,
+    class_mode="categorical",
+    color_mode="rgb",
+    subset="validation"
+)
+
+test_generator = test_datagen.flow_from_directory(
+    os.path.join(DATASET_PATH, "test"),
+    target_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE,
+    class_mode="categorical",
     color_mode="rgb",
     shuffle=False
 )
 
-class_names = train_ds.class_names
-NUM_CLASSES = len(class_names)
-AUTOTUNE = tf.data.AUTOTUNE
+# =====================
+# MODEL
+# =====================
 
-# =====================================================
-# 4️⃣ FER DATASET CORRECTION + PREPROCESSING
-# =====================================================
-def preprocess(x, y):
-    x = tf.cast(x, tf.float32)
-
-    # Improve low contrast (FER fix)
-    x = tf.image.random_contrast(x, 0.8, 1.3)
-
-    # EfficientNet normalization
-    x = preprocess_input(x)
-
-    return x, y
-
-train_ds = train_ds.map(preprocess, num_parallel_calls=AUTOTUNE)
-val_ds = val_ds.map(preprocess, num_parallel_calls=AUTOTUNE)
-
-train_ds = train_ds.shuffle(1000).prefetch(AUTOTUNE)
-val_ds = val_ds.prefetch(AUTOTUNE)
-
-# =====================================================
-# 5️⃣ CLASS WEIGHTS (Fix imbalance)
-# =====================================================
-y_train = np.concatenate([y.numpy() for x, y in train_ds], axis=0)
-
-class_weights_array = compute_class_weight(
-    class_weight="balanced",
-    classes=np.unique(y_train),
-    y=y_train
-)
-
-class_weights = dict(enumerate(class_weights_array))
-
-# =====================================================
-# 6️⃣ DATA AUGMENTATION (Safe)
-# =====================================================
-data_augmentation = keras.Sequential([
-    layers.RandomFlip("horizontal"),
-    layers.RandomRotation(0.12),
-    layers.RandomZoom(0.12),
-])
-
-# =====================================================
-# 7️⃣ BUILD MODEL
-# =====================================================
-base_model = EfficientNetB2(
+base_model = EfficientNetB0(
     include_top=False,
     weights="imagenet",
     input_shape=(IMG_SIZE, IMG_SIZE, 3)
@@ -104,98 +72,43 @@ base_model = EfficientNetB2(
 
 base_model.trainable = False
 
-inputs = keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
-x = data_augmentation(inputs)
-x = base_model(x, training=False)
-x = layers.GlobalAveragePooling2D()(x)
-x = layers.BatchNormalization()(x)
-x = layers.Dense(512, activation="relu")(x)
-x = layers.Dropout(0.5)(x)
-
-# Force float32 output (mixed precision safe save)
-outputs = layers.Dense(NUM_CLASSES, activation="softmax", dtype="float32")(x)
-
-model = keras.Model(inputs, outputs)
-
-# =====================================================
-# 8️⃣ COSINE LEARNING RATE
-# =====================================================
-lr_schedule = keras.optimizers.schedules.CosineDecay(
-    initial_learning_rate=1e-3,
-    decay_steps=1000
-)
+model = models.Sequential([
+    base_model,
+    layers.GlobalAveragePooling2D(),
+    layers.BatchNormalization(),
+    layers.Dense(256, activation="relu"),
+    layers.Dropout(0.5),
+    layers.Dense(NUM_CLASSES, activation="softmax")
+])
 
 model.compile(
-    optimizer=keras.optimizers.Adam(lr_schedule),
-    # FIX: Removed label_smoothing from SparseCategoricalCrossentropy
-    loss=keras.losses.SparseCategoricalCrossentropy(),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+    loss="categorical_crossentropy",
     metrics=["accuracy"]
 )
-
-# =====================================================
-# 9️⃣ CALLBACKS (Crash Protection)
-# =====================================================
-os.makedirs("models", exist_ok=True)
 
 callbacks = [
-    keras.callbacks.ModelCheckpoint(
-        "models/best_model.h5",
-        monitor="val_accuracy",
-        save_best_only=True,
-        verbose=1
-    ),
-    keras.callbacks.EarlyStopping(
-        monitor="val_accuracy",
-        patience=6,
-        restore_best_weights=True
-    ),
-    keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss",
-        factor=0.3,
-        patience=3,
-        verbose=1
-    )
+    EarlyStopping(patience=8, restore_best_weights=True),
+    ReduceLROnPlateau(patience=4, factor=0.2),
+    ModelCheckpoint(MODEL_SAVE_PATH, save_best_only=True)
 ]
 
-# =====================================================
-# 🚀 STAGE 1 TRAIN
-# =====================================================
-print("🚀 Stage 1 Training")
+# =====================
+# TRAIN
+# =====================
+
 model.fit(
-    train_ds,
-    validation_data=val_ds,
-    epochs=EPOCHS_STAGE1,
-    class_weight=class_weights,
+    train_generator,
+    validation_data=val_generator,
+    epochs=EPOCHS,
     callbacks=callbacks
 )
 
-# =====================================================
-# 🔥 STAGE 2 FINE TUNE
-# =====================================================
-base_model.trainable = True
+# =====================
+# EVALUATE
+# =====================
 
-for layer in base_model.layers[:int(len(base_model.layers)*0.6)]:
-    layer.trainable = False
+test_loss, test_acc = model.evaluate(test_generator)
+print(f"\nTest Accuracy: {test_acc * 100:.2f}%")
 
-model.compile(
-    optimizer=keras.optimizers.Adam(1e-5),
-    # FIX: Removed label_smoothing from SparseCategoricalCrossentropy here too
-    loss=keras.losses.SparseCategoricalCrossentropy(),
-    metrics=["accuracy"]
-)
-
-print("🔥 Stage 2 Fine Tuning")
-model.fit(
-    train_ds,
-    validation_data=val_ds,
-    epochs=EPOCHS_STAGE2,
-    class_weight=class_weights,
-    callbacks=callbacks
-)
-
-# =====================================================
-# 10️⃣ FINAL SAVE
-# =====================================================
-model.save("models/final_emotion_model.h5")
-
-print("✅ Training Complete — Model Saved Safely")
+print("Model saved to:", MODEL_SAVE_PATH)
