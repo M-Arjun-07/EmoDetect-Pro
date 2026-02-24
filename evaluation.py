@@ -7,7 +7,7 @@ import os
 import cv2
 
 # Load model
-model = load_model("models/emotion_cnn_48.keras")
+model = load_model("models/emotion_mobilenetv2_64.keras")
 
 TRAIN_PATH = "dataset/train"
 TEST_PATH = "dataset/test"

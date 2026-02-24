@@ -10,7 +10,7 @@ import time
 # ==========================================
 # CONFIGURATION & CONSTANTS
 # ==========================================
-MODEL_PATH = "models/emotion_model_improved.keras"
+MODEL_PATH = "models/emotion_efficientnet.h5"
 TASK_PATH = "face_landmarker.task"
 EMOTION_LABELS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
 
