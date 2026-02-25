@@ -8,3 +8,5 @@ with tf.device('/GPU:0'):
     a = tf.random.normal([1000, 1000])
     b = tf.matmul(a, a)
     print("Matrix multiplication done on GPU")
+
+print("Test completed successfully.")
